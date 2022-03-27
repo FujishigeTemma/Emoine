@@ -8,6 +8,7 @@ import (
 	"time"
 
 	twitterstream "github.com/fallenstedt/twitter-stream"
+	"github.com/fallenstedt/twitter-stream/rules"
 )
 
 type StreamData struct {
@@ -62,7 +63,7 @@ func NewTwitter(comment chan<- string, clientID string, clientSecret string, que
 		ruleIDs = append(ruleIDs, id)
 	}
 
-	_, err = api.Rules.Delete(twitterstream.NewRuleDelete(ruleIDs...), false)
+	_, err = api.Rules.Delete(rules.NewDeleteRulesRequest(ruleIDs...), false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete rules: %w", err)
 	}
