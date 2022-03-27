@@ -52,20 +52,22 @@ func NewTwitter(comment chan<- string, clientID string, clientSecret string, que
 		return nil, fmt.Errorf("failed to get rules: %w", err)
 	}
 
-	ruleIDs := make([]int, 0, len(res.Data))
-	for _, rule := range res.Data {
-		log.Printf("rule:%s\n", rule)
-		id, err := strconv.Atoi(rule.Id)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert rule id to int: %w", err)
+	if len(res.Data) > 0 {
+		ruleIDs := make([]int, 0, len(res.Data))
+		for _, rule := range res.Data {
+			log.Printf("rule:%s\n", rule)
+			id, err := strconv.Atoi(rule.Id)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert rule id to int: %w", err)
+			}
+
+			ruleIDs = append(ruleIDs, id)
 		}
 
-		ruleIDs = append(ruleIDs, id)
-	}
-
-	_, err = api.Rules.Delete(rules.NewDeleteRulesRequest(ruleIDs...), false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete rules: %w", err)
+		_, err = api.Rules.Delete(rules.NewDeleteRulesRequest(ruleIDs...), false)
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete rules: %w", err)
+		}
 	}
 
 	rules := twitterstream.NewRuleBuilder().
