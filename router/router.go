@@ -1,7 +1,6 @@
 package router
 
 import (
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -25,33 +24,13 @@ type Handlers struct {
 	clientID      string
 }
 
-func Setup(repo repository.Repository) *echo.Echo {
+func Setup(repo repository.Repository, streamer *streamer.Streamer) *echo.Echo {
 	setDefaultStateData()
 
 	e := echo.New()
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(session.Middleware(sessions.NewCookieStore([]byte(os.Getenv("SECRET")))))
-	commentChan := make(chan string, 5)
-
-	s := streamer.NewStreamer(repo, commentChan)
-
-	twitter, err := twitter.NewTwitter(
-		commentChan,
-		os.Getenv("TWITTER_CLIENT_ID"),
-		os.Getenv("TWITTER_CLIENT_SECRET"),
-		os.Getenv("TWITTER_QUERY"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	go func() {
-		err := twitter.Start()
-		if err != nil {
-			log.Println(err)
-		}
-	}()
 
 	h := &Handlers{
 		repo: repo,
@@ -62,7 +41,7 @@ func Setup(repo repository.Repository) *echo.Echo {
 			SameSite: http.SameSiteLaxMode,
 		},
 		clientID: os.Getenv("CLIENT_ID"),
-		streamer: s,
+		streamer: streamer,
 	}
 
 	api := e.Group("/api", h.SessionMiddleware)

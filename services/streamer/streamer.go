@@ -51,57 +51,58 @@ func NewStreamer(repo repository.Repository, commentChan <-chan string) *Streame
 }
 
 func (s *Streamer) run() {
+	defer s.close()
+
 	for {
 		select {
-		case client := <-s.registry:
+		case client := <-s.registry: // websocket接続が確立された時か、あるいは切断された時
 			if client.active {
 				s.clients[client.Key()] = client
 			} else {
 				delete(s.clients, client.Key())
 			}
 
-			m, err := getViewerMessage(client.UserID(), len(s.clients))
+			m, err := marshalViewerMessage(client.UserID(), len(s.clients))
 			if err != nil {
 				log.Printf("error: %v", err)
 				break
 			}
 			s.SendAll(m)
-		case m := <-s.messageBuffer:
+		case m := <-s.messageBuffer: // クライアントからメッセージを受け取った時
 			err := s.logger(m)
 			if err != nil {
 				log.Printf("error: %v", err)
 			}
-
 			s.SendAll(m)
-		case comment := <-s.commentChan:
-			s.addComment(comment)
+		case comment := <-s.commentChan: // twitter上のコメントを受け取った時
+			m, err := s.marshalCommentMessage(comment)
+			if err != nil {
+				log.Printf("error: %v", err)
+				break
+			}
+			s.SendAll(m)
 		}
 	}
 }
 
-func (s *Streamer) addComment(comment string) {
-	msg := &pb.Message{
-		Payload: &pb.Message_Comment{
-			Comment: &pb.Comment{
-				PresentationId: s.presentationId,
-				Text:           comment,
-			},
-		},
-	}
+func (s *Streamer) close() {
+	s.rwm.Lock()
+	defer s.rwm.Unlock()
 
-	data, err := proto.Marshal(msg)
-	if err != nil {
-		log.Printf("error: %v", err)
-		return
+	m := &rawMessage{
+		messageType: websocket.CloseMessage,
+		data:        websocket.FormatCloseMessage(websocket.CloseServiceRestart, "Server is stopping..."),
 	}
-
-	m := &rawMessage{uuid.Nil, websocket.BinaryMessage, data}
-	err = s.logger(m)
-	if err != nil {
-		log.Printf("error: %v", err)
+	for _, client := range s.clients {
+		if err := client.PushMessage(m); err != nil {
+			log.Printf("error: %v", err)
+		}
+		delete(s.clients, client.Key())
+		if err := client.Close(); err != nil {
+			log.Printf("error: %v", err)
+		}
 	}
-
-	s.SendAll(m)
+	s.active = false
 }
 
 // SendAll すべてのclientにメッセージを送る
@@ -113,7 +114,26 @@ func (s *Streamer) SendAll(m *rawMessage) {
 	}
 }
 
-func getViewerMessage(userID uuid.UUID, length int) (*rawMessage, error) {
+func (s *Streamer) marshalCommentMessage(comment string) (*rawMessage, error) {
+	msg := &pb.Message{
+		Payload: &pb.Message_Comment{
+			Comment: &pb.Comment{
+				PresentationId: s.presentationId,
+				Text:           comment,
+			},
+		},
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+	// use uuid.Nil as userID of twitter client
+	m := &rawMessage{uuid.Nil, websocket.BinaryMessage, data}
+	return m, nil
+}
+
+func marshalViewerMessage(userID uuid.UUID, length int) (*rawMessage, error) {
 	msg := &pb.Message{
 		Payload: &pb.Message_Viewer{
 			Viewer: &pb.Viewer{Count: uint32(length)},
@@ -209,36 +229,4 @@ func (s *Streamer) IsClosed() bool {
 	defer s.rwm.RUnlock()
 
 	return !s.active
-}
-
-// IsClosedWithoutLock ストリーマーが停止しているかどうか
-func (s *Streamer) IsClosedWithoutLock() bool {
-	return !s.active
-}
-
-// Close ストリーマーを停止します
-func (s *Streamer) Close() error {
-	if s.IsClosedWithoutLock() {
-		return ErrAlreadyClosed
-	}
-
-	s.rwm.Lock()
-	defer s.rwm.Unlock()
-
-	m := &rawMessage{
-		messageType: websocket.CloseMessage,
-		data:        websocket.FormatCloseMessage(websocket.CloseServiceRestart, "Server is stopping..."),
-	}
-	for _, client := range s.clients {
-		if err := client.PushMessage(m); err != nil {
-			log.Printf("error: %v", err)
-		}
-		delete(s.clients, client.Key())
-		if err := client.Close(); err != nil {
-			log.Printf("error: %v", err)
-		}
-	}
-	s.active = false
-
-	return nil
 }

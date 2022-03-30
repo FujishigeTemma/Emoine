@@ -11,6 +11,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/traPtitech/Emoine/repository"
 	"github.com/traPtitech/Emoine/router"
+	"github.com/traPtitech/Emoine/services/streamer"
+	"github.com/traPtitech/Emoine/services/twitter"
 )
 
 const (
@@ -67,11 +69,30 @@ func main() {
 		dbForBatch.MustExec(string(data))
 	}
 
+	twitterCommentChan := make(chan string, 10)
+	t, err := twitter.NewTwitter(
+		twitterCommentChan,
+		os.Getenv("TWITTER_CLIENT_ID"),
+		os.Getenv("TWITTER_CLIENT_SECRET"),
+		os.Getenv("TWITTER_QUERY"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 	repo, err := repository.NewSqlxRepository(db)
 	if err != nil {
 		panic(err)
 	}
-	echo := router.Setup(repo)
+	s := streamer.NewStreamer(repo, twitterCommentChan)
+
+	go func() {
+		err := t.Start()
+		if err != nil {
+			log.Println(err)
+		}
+	}()
+
+	echo := router.Setup(repo, s)
 	if err = echo.Start(fmt.Sprintf(":%d", port)); err != nil {
 		panic(err)
 	}
